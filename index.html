@@ -3057,6 +3057,15 @@
         ]
       };
 
+    function trackEvent(name, params = {}) {
+      if (typeof gtag !== 'function') return;
+      try {
+        gtag('event', name, params);
+      } catch (err) {
+        console.warn('Analytics event error', err);
+      }
+    }
+
     (function () {
       const THEME_KEY = 'theme';
       const mqLight = window.matchMedia('(prefers-color-scheme: light)');
@@ -3094,6 +3103,7 @@
         const next = order[(order.indexOf(current) + 1) % order.length];
         localStorage.setItem(THEME_KEY, next);
         applyTheme(next);
+        trackEvent('theme_change', { mode: next, effective_mode: effectiveMode(next) });
       }
 
       mqLight.addEventListener('change', () => {
@@ -3184,6 +3194,7 @@
         cb.addEventListener('change', e => {
           const k = e.target.dataset.key;
           if (e.target.checked) selectedSets.add(k); else selectedSets.delete(k);
+          trackEvent('question_set_toggle', { set: k, selected: e.target.checked ? 1 : 0 });
           reflectToggleAll();
         });
       });
@@ -3198,11 +3209,23 @@
     toggleAllEl.addEventListener('change', () => {
       if (toggleAllEl.checked) selectedSets = new Set(Object.keys(QUESTION_SETS));
       else selectedSets.clear();
+      trackEvent('question_set_toggle_all', { selected: toggleAllEl.checked ? 1 : 0 });
       renderSetList();
     });
 
-    shuffleAnswersEl.addEventListener('change', () => quiz.shuffleAnswers = shuffleAnswersEl.checked);
-    shuffleQuestionsEl.addEventListener('change', () => quiz.shuffleQuestions = shuffleQuestionsEl.checked);
+    shuffleAnswersEl.addEventListener('change', () => {
+      quiz.shuffleAnswers = shuffleAnswersEl.checked;
+      trackEvent('shuffle_answers_toggle', { enabled: quiz.shuffleAnswers ? 1 : 0 });
+    });
+    shuffleQuestionsEl.addEventListener('change', () => {
+      quiz.shuffleQuestions = shuffleQuestionsEl.checked;
+      trackEvent('shuffle_questions_toggle', { enabled: quiz.shuffleQuestions ? 1 : 0 });
+    });
+
+    numQuestionsEl.addEventListener('change', () => {
+      const value = parseInt(numQuestionsEl.value, 10) || 0;
+      trackEvent('questions_requested_change', { value });
+    });
 
     renderSetList();
 
@@ -3215,16 +3238,18 @@
       return dedupeByQuestion(pool);
     }
 
-    function makeQuiz(nWanted) {
+    function makeQuiz(nWanted, source = 'start') {
       const pool = buildPool();
       const n = Math.min(nWanted, pool.length);
 
       if (pool.length === 0) {
         showNotice('Nu există întrebări valide în seturile selectate. Verifică datele sau alege alte seturi.', true);
+        trackEvent('quiz_start_failed', { reason: 'empty_pool', requested_questions: nWanted, selected_sets: selectedSets.size });
         return false;
       }
       if (nWanted > pool.length) {
         showNotice(`Doar ${pool.length} întrebări disponibile în seturile selectate. Testul va folosi ${n}.`, false);
+        trackEvent('quiz_start_adjusted', { requested_questions: nWanted, available_questions: pool.length });
       } else {
         hideNotice();
       }
@@ -3241,6 +3266,14 @@
       quiz.index = 0;
       renderQuiz();
       startTimer(3600);
+      trackEvent('quiz_start', {
+        source,
+        requested_questions: nWanted,
+        used_questions: n,
+        selected_sets: selectedSets.size,
+        shuffle_answers: quiz.shuffleAnswers ? 1 : 0,
+        shuffle_questions: quiz.shuffleQuestions ? 1 : 0
+      });
       return true;
     }
 
@@ -3266,6 +3299,7 @@
       if (!timerTextEl) return;
       timeLeft = totalSeconds;
       updateTimerUI();
+      trackEvent('timer_start', { seconds: totalSeconds });
       timerId = setInterval(() => {
         timeLeft -= 1;
         updateTimerUI();
@@ -3291,6 +3325,9 @@
 
     function autoSubmit(motiv) {
       const score = quiz.answers.reduce((acc, ans, i) => acc + (ans === quiz.questions[i].correctIndex ? 1 : 0), 0);
+      const total = quiz.questions.length || 0;
+      const pct = total ? Math.round((score/total) * 100) : 0;
+      trackEvent('quiz_auto_submit', { reason: motiv || 'auto', score, total, pct });
       showResults(score, motiv);
     }
 
@@ -3325,7 +3362,12 @@
         btn.type = 'button';
         btn.textContent = i+1;
         btn.className = (quiz.answers[i] !== null ? 'done ' : '') + (i === quiz.index ? 'active' : '');
-        btn.addEventListener('click', () => { quiz.index = i; renderCurrentQuestion(); renderNav(); renderProgress(); });
+        btn.addEventListener('click', () => {
+          const prev = quiz.index;
+          quiz.index = i;
+          renderCurrentQuestion(); renderNav(); renderProgress();
+          trackEvent('question_nav', { action: 'jump', from: prev + 1, to: i + 1 });
+        });
         qnavEl.appendChild(btn);
       });
     }
@@ -3352,7 +3394,11 @@
         const radio = document.createElement('input');
         radio.type = 'radio'; radio.name = name; radio.id = id; radio.value = String(i);
         if (quiz.answers[quiz.index] === i) radio.checked = true;
-        radio.addEventListener('change', () => { quiz.answers[quiz.index] = i; renderNav(); renderProgress(); });
+        radio.addEventListener('change', () => {
+          quiz.answers[quiz.index] = i;
+          renderNav(); renderProgress();
+          trackEvent('answer_select', { question_id: q.id, question_number: quiz.index + 1, option_index: i });
+        });
 
         const span = document.createElement('span');
         span.textContent = opt;
@@ -3362,21 +3408,47 @@
       });
     }
 
-    $('#prevBtn').addEventListener('click', () => { if (quiz.index > 0) { quiz.index--; renderCurrentQuestion(); renderNav(); renderProgress(); } });
-    $('#nextBtn').addEventListener('click', () => { if (quiz.index < quiz.questions.length - 1) { quiz.index++; renderCurrentQuestion(); renderNav(); renderProgress(); } });
-    $('#clearBtn').addEventListener('click', () => { quiz.answers[quiz.index] = null; renderCurrentQuestion(); renderNav(); renderProgress(); });
+    $('#prevBtn').addEventListener('click', () => {
+      if (quiz.index > 0) {
+        const from = quiz.index;
+        quiz.index--;
+        renderCurrentQuestion(); renderNav(); renderProgress();
+        trackEvent('question_nav', { action: 'prev', from: from + 1, to: quiz.index + 1 });
+      }
+    });
+    $('#nextBtn').addEventListener('click', () => {
+      if (quiz.index < quiz.questions.length - 1) {
+        const from = quiz.index;
+        quiz.index++;
+        renderCurrentQuestion(); renderNav(); renderProgress();
+        trackEvent('question_nav', { action: 'next', from: from + 1, to: quiz.index + 1 });
+      } else {
+        const submitBtn = document.getElementById('submitBtn');
+        if (submitBtn) submitBtn.click();
+      }
+    });
+    $('#clearBtn').addEventListener('click', () => {
+      quiz.answers[quiz.index] = null;
+      renderCurrentQuestion(); renderNav(); renderProgress();
+      const current = quiz.questions[quiz.index];
+      trackEvent('answer_clear', { question_id: current ? current.id : null, question_number: quiz.index + 1 });
+    });
     $('#startBtn').addEventListener('click', () => {
       const wanted = parseInt(numQuestionsEl.value, 10) || 20;
-      makeQuiz(wanted);
+      makeQuiz(wanted, 'start_button');
     });
 
     $('#submitBtn').addEventListener('click', () => {
       clearTimer();
       const unanswered = quiz.answers.reduce((acc, v, i) => (v === null ? acc.concat(i) : acc), []);
       if (unanswered.length > 0 && !confirm(`Ai ${unanswered.length} întrebări la care nu ai oferit un răspuns. Trimiți oricum?`)) {
+        trackEvent('quiz_submit_cancel', { reason: 'unanswered', unanswered: unanswered.length });
         return;
       }
       const score = quiz.answers.reduce((acc, ans, i) => acc + (ans === quiz.questions[i].correctIndex ? 1 : 0), 0);
+      const total = quiz.questions.length || 0;
+      const pct = total ? Math.round((score/total) * 100) : 0;
+      trackEvent('quiz_submit', { score, total, pct, unanswered: unanswered.length });
       showResults(score);
     });
 
@@ -3408,10 +3480,19 @@
 
     $('#againBtn').addEventListener('click', () => {
       const wanted = parseInt(numQuestionsEl.value, 10) || 20;
-      makeQuiz(wanted);
+      makeQuiz(wanted, 'again_button');
     });
-    $('#reviewBtn').addEventListener('click', () => { $('#reviewBlock').open = !$('#reviewBlock').open; });
-    $('#backBtn').addEventListener('click', () => { clearTimer(); showPanel('setup'); });
+    $('#reviewBtn').addEventListener('click', () => {
+      const block = $('#reviewBlock');
+      const nextOpen = !block.open;
+      block.open = nextOpen;
+      trackEvent('review_toggle', { open: nextOpen ? 1 : 0 });
+    });
+    $('#backBtn').addEventListener('click', () => {
+      clearTimer();
+      showPanel('setup');
+      trackEvent('quiz_back_to_setup', { from: 'results' });
+    });
     showPanel('setup');
     (function(){
       const KEY='text-zoom';
@@ -3427,6 +3508,7 @@
         const val=clamp(parseFloat(v)||1);
         root.style.setProperty('--text-zoom', String(val));
         try{ localStorage.setItem(KEY, String(val)); }catch(e){}
+        return val;
       }
       function init(){
         const saved = localStorage.getItem(KEY);
@@ -3434,9 +3516,18 @@
       }
 
       init();
-      dec && dec.addEventListener('click', ()=> set(get()-STEP));
-      inc && inc.addEventListener('click', ()=> set(get()+STEP));
-      reset && reset.addEventListener('click', ()=> set(1));
+      dec && dec.addEventListener('click', ()=> {
+        const val = set(get()-STEP);
+        trackEvent('text_zoom_change', { action: 'decrease', value: val });
+      });
+      inc && inc.addEventListener('click', ()=> {
+        const val = set(get()+STEP);
+        trackEvent('text_zoom_change', { action: 'increase', value: val });
+      });
+      reset && reset.addEventListener('click', ()=> {
+        const val = set(1);
+        trackEvent('text_zoom_change', { action: 'reset', value: val });
+      });
     })();
   </script>
 </body>
