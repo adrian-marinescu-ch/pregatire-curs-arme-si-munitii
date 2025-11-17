@@ -362,8 +362,9 @@
       </div>
     </header>
     <section id="setup" class="card panel">
-      <div class="cta" style="margin-bottom: 14px;">
-        <button id="startBtn" class="btn" style="width: 100%;">Începe testul</button>
+      <div class="cta" style="margin-bottom: 14px; display:flex; gap:10px; flex-wrap: wrap;">
+        <button id="startBtn" class="btn" style="flex:1 1 220px;">Începe testul</button>
+        <button id="pdfBtn" class="btn secondary" type="button" style="flex:1 1 220px;">Printează testul</button>
       </div>
       <h2>Setari</h2>
       <div style="margin-top: 10px; margin-bottom: 10px; display:flex; gap:14px; align-items:center; flex-wrap: wrap;">
@@ -3932,6 +3933,165 @@
         const val = set(1);
         trackEvent('text_zoom_change', { action: 'reset', value: val });
       });
+    })();
+    (function(){
+      const ANSWER_LETTERS = ['A','B','C'];
+      let printTemplate = null;
+
+      function escapeHtml(str) {
+        return String(str || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\"/g, '&quot;');
+      }
+
+      function selectedQuizConfig() {
+        const countInput = document.getElementById('numQuestions');
+        const requested = parseInt(countInput?.value || '20', 10) || 20;
+        return {
+          requested,
+          shuffleAnswers: !!quiz.shuffleAnswers,
+          shuffleQuestions: !!quiz.shuffleQuestions,
+        };
+      }
+
+      function buildQuestionSet({ requested, shuffleAnswers, shuffleQuestions }) {
+        const pool = buildPool();
+        if (!pool || pool.length === 0) {
+          return { questions: [], poolSize: 0 };
+        }
+        const n = Math.min(requested, pool.length);
+        const base = shuffleQuestions ? sample(pool, n, true) : pool.slice(0, n);
+        const questions = base.map(q => {
+          const order = shuffleAnswers ? shuffle([0,1,2]) : [0,1,2];
+          const options = order.map(i => q.options[i]);
+          const correctIndex = order.indexOf(q.correct);
+          return { id: q.id, text: q.text, options, correctIndex };
+        });
+        return { questions, poolSize: pool.length };
+      }
+
+      const INLINE_TEMPLATE = `<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <title>{{TITLE}}</title>
+  <style>
+    :root { color-scheme: light; }
+    body { font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color:#0b1020; }
+    h1, h2 { margin: 0 0 12px; }
+    .meta { color:#555; margin-bottom: 16px; }
+    ol.questions { padding-left: 20px; }
+    .questions > li { margin-bottom: 16px; }
+    .q-text { font-weight: 700; margin-bottom: 6px; }
+    .opts { margin: 0; padding-left: 20px; }
+    .opts li { margin: 4px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border:1px solid #ccc; padding: 6px 8px; text-align: left; }
+    th { background:#f4f4f9; }
+    .muted { color:#777; font-size: 12px; }
+    .page-break { page-break-before: always; }
+    @media print {
+      body { margin: 12mm; }
+      .no-print { display:none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom:12px; color:#555;">Închide această filă după ce salvezi/expotezi ca PDF.</div>
+  <h1>{{TITLE}}</h1>
+  <div class="meta">Generat la data: {{DATE}} | {{COUNT}} întrebări</div>
+  <ol class="questions">
+    {{QUESTIONS}}
+  </ol>
+
+  <div class="page-break"></div>
+  <h2>Răspunsuri</h2>
+  <table>
+    <thead><tr><th>#</th><th>Răspuns corect</th><th>Cod intrebare</th></tr></thead>
+    <tbody>
+      {{ANSWERS}}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+      async function loadTemplate() {
+        if (printTemplate) return printTemplate;
+        printTemplate = INLINE_TEMPLATE;
+        return printTemplate;
+      }
+
+      function renderDoc(template, questions) {
+        const today = new Date().toLocaleString('ro-RO');
+        const questionHtml = questions.map((q, i) => `
+          <li>
+            <div class="q-text">${escapeHtml(q.text)}</div>
+            <ol class="opts" type="A">
+              ${q.options.map(opt => `<li>${escapeHtml(opt)}</li>`).join('')}
+            </ol>
+          </li>`).join('');
+
+        const answersHtml = questions.map((q, i) => `
+          <tr>
+            <td>${i + 1}</td>
+            <td>${ANSWER_LETTERS[q.correctIndex] || ''}</td>
+            <td class="muted">${escapeHtml(q.id || '')}</td>
+          </tr>`).join('');
+
+        return template
+          .replace(/{{TITLE}}/g, `Chestionar curs arme și muniții`)
+          .replace(/{{DATE}}/g, today)
+          .replace(/{{COUNT}}/g, String(questions.length))
+          .replace(/{{QUESTIONS}}/g, questionHtml)
+          .replace(/{{ANSWERS}}/g, answersHtml);
+      }
+
+      function openPrintableDocument(html) {
+        const win = window.open('', '_blank');
+        if (!win) {
+          alert('Nu s-a putut deschide fereastra pentru PDF. Permite pop-up-urile și încearcă din nou.');
+          return;
+        }
+        win.document.open();
+        win.document.write(html);
+        win.document.close();
+        win.focus();
+        try { setTimeout(() => win.print(), 300); } catch (err) {
+          console.warn('Nu am putut lansa dialogul de print.', err);
+        }
+      }
+
+      async function generatePdf() {
+        const config = selectedQuizConfig();
+        const { questions, poolSize } = buildQuestionSet(config);
+        if (!questions.length) {
+          alert('Nu există întrebări valide pentru selecția curentă.');
+          return;
+        }
+        const template = await loadTemplate();
+        if (!template) {
+          alert('Nu am putut genera PDF-ul. Încearcă din nou.');
+          return;
+        }
+        const html = renderDoc(template, questions);
+        trackEvent('quiz_pdf_export', {
+          questions: questions.length,
+          requested: config.requested,
+          pool: poolSize,
+          shuffle_answers: config.shuffleAnswers ? 1 : 0,
+          shuffle_questions: config.shuffleQuestions ? 1 : 0,
+        });
+        openPrintableDocument(html);
+      }
+
+      function initPdfButton() {
+        const btn = document.getElementById('pdfBtn');
+        if (btn) btn.addEventListener('click', generatePdf);
+      }
+
+      initPdfButton();
     })();
   </script>
 </body>

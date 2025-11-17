@@ -16,6 +16,7 @@ Funcționează pe **GitHub Pages** sau orice hosting static.
 * ✅ **20 întrebări aleatorii** (număr configurabil), **single-answer** cu **3 opțiuni**
 * 🔁 **Deduplicare după textul întrebării** (case-insensitive, normalize)
 * ⏱️ **Limită de timp** (implicit **1h**), cu **auto-submit** la expirare
+* 🖨️ **Export rapid în PDF** (Întrebări + tabel cu răspunsuri) din prima pagină, păstrează selecția și opțiunile de amestecare
 * 🎚️ **Accesibilitate**: butoane **A- / A / A+** pentru scalarea textului (persistă în `localStorage`)
 * 🌓 **Temă**: **Auto** (urmează sistemul) / **Dark** / **Light** + toggle, persistă la utilizator
 * 📱 **Responsive**: toolbar centrat pe desktop, **vertical & non-overlay pe mobil**
