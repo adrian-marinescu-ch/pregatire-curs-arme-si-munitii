@@ -318,12 +318,14 @@
     }
     .pill.time { font-weight:700; }
     .pill.time.warn { color: #fff; background: #6f2c2c; border-color: #9d3d3d; }
+    .pill.seed { font-weight:600; text-transform: uppercase; }
 
     @media (max-width: 520px) {
       .progress { flex-wrap: wrap; gap: 8px; }
       .footer-nav { flex-direction: column; align-items: stretch; }
       .footer-nav .btn { width: 100%; }
       .qnav { grid-template-columns: repeat(auto-fill, minmax(32px,1fr)); }
+      .pill.seed { width: 100%; text-align: center; }
     }
 
     .results .score { font-size: 2.625rem; font-weight: 800; }
@@ -384,6 +386,7 @@
         <div class="bar"><span id="progressBar"></span></div>
         <div class="pill time" id="timerText">--:--</div>
         <div class="pill" id="pageText">1 / 1</div>
+        <div class="pill seed hide" id="seedInfo" aria-live="polite"></div>
       </div>
       <div class="qnav" id="qnav"></div>
       <form id="qform" class="question-card">
@@ -3811,6 +3814,7 @@
     const progressTextEl = $('#progressText');
     const progressBarEl = $('#progressBar');
     const pageTextEl = $('#pageText');
+    const seedInfoEl = $('#seedInfo');
 
     function showPanel(which) {
       setupEl.classList.toggle('hide', which !== 'setup');
@@ -3848,6 +3852,15 @@
       const pct = Math.round((answered / quiz.questions.length) * 100);
       progressBarEl.style.width = pct + '%';
       pageTextEl.textContent = `${quiz.index+1} / ${quiz.questions.length}`;
+      if (seedInfoEl) {
+        if (quiz.seedCode) {
+          seedInfoEl.textContent = `Cod test: ${quiz.seedCode}`;
+          seedInfoEl.classList.remove('hide');
+        } else {
+          seedInfoEl.textContent = '';
+          seedInfoEl.classList.add('hide');
+        }
+      }
     }
 
     function renderCurrentQuestion() {
@@ -4071,7 +4084,7 @@
 <body>
   <div class="no-print" style="margin-bottom:12px; color:#555;">Închide această filă după ce salvezi/expotezi ca PDF.</div>
   <h1>{{TITLE}}</h1>
-  <div class="meta">Generat la data: {{DATE}} | {{COUNT}} întrebări</div>
+  <div class="meta">Generat la data: {{DATE}} | {{COUNT}} întrebări{{SEED_NOTE}}</div>
   <ol class="questions">
     {{QUESTIONS}}
   </ol>
@@ -4093,7 +4106,7 @@
         return printTemplate;
       }
 
-      function renderDoc(template, questions) {
+      function renderDoc(template, questions, seedInfo) {
         const today = new Date().toLocaleString('ro-RO');
         const questionHtml = questions.map((q, i) => `
           <li>
@@ -4109,11 +4122,15 @@
             <td>${ANSWER_LETTERS[q.correctIndex] || ''}</td>
             <td class="muted">${escapeHtml(q.id || '')}</td>
           </tr>`).join('');
+        const seedNote = seedInfo && seedInfo.code
+          ? ` | Cod test: ${escapeHtml(seedInfo.code)}`
+          : '';
 
         return template
           .replace(/{{TITLE}}/g, `Chestionar curs arme și muniții`)
           .replace(/{{DATE}}/g, today)
           .replace(/{{COUNT}}/g, String(questions.length))
+          .replace(/{{SEED_NOTE}}/g, seedNote)
           .replace(/{{QUESTIONS}}/g, questionHtml)
           .replace(/{{ANSWERS}}/g, answersHtml);
       }
@@ -4145,7 +4162,7 @@
           alert('Nu am putut genera PDF-ul. Încearcă din nou.');
           return;
         }
-        const html = renderDoc(template, questions);
+        const html = renderDoc(template, questions, seedInfo);
         trackEvent('quiz_pdf_export', {
           questions: questions.length,
           requested: config.requested,
