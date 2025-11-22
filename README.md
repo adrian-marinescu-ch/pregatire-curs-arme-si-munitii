@@ -17,6 +17,7 @@ Funcționează pe **GitHub Pages** sau orice hosting static.
 * 🔁 **Deduplicare după textul întrebării** (case-insensitive, normalize)
 * ⏱️ **Limită de timp** (implicit **1h**), cu **auto-submit** la expirare
 * 🖨️ **Export rapid în PDF** (Întrebări + tabel cu răspunsuri) din prima pagină, păstrează selecția și opțiunile de amestecare
+* 🔑 **Cod test (optional)**: introduce același cod pentru a genera exact aceleași întrebări/opțiuni pentru toți participanții
 * 🎚️ **Accesibilitate**: butoane **A- / A / A+** pentru scalarea textului (persistă în `localStorage`)
 * 🌓 **Temă**: **Auto** (urmează sistemul) / **Dark** / **Light** + toggle, persistă la utilizator
 * 📱 **Responsive**: toolbar centrat pe desktop, **vertical & non-overlay pe mobil**
@@ -73,8 +74,8 @@ const QUESTION_SETS = {
 **Se salvează răspunsurile pe server?**
 Nu. Aplicația nu are backend; preferințele de temă și mărime text se salvează local (în `localStorage`).
 
-**Pot încărca întrebările dintr-un fișier JSON separat?**
-Da — poți muta `QUESTION_SETS` într-un fișier `.js` sau `.json` și să-l incluzi înainte de scriptul principal (dacă folosești `.json`, ai nevoie de un fetch simplu).
+**Cum folosesc codul de test (optional)?**
+Pe pagina de configurare există câmpul „Cod test”. Introdu același cod (de ex. `GRUPA-1`) pe toate dispozitivele și pornește testul sau exportul PDF. Generarea devine deterministă: participanții obțin aceleași întrebări și aceleași ordini ale opțiunilor, util pentru simulări coordonate sau pentru a discuta pe aceleași grile.
 
 ---
 

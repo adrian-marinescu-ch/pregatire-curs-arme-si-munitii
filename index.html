@@ -260,7 +260,7 @@
     @media (max-width: 800px) { .grid.cols-2 { grid-template-columns: 1fr; } }
 
     label.inline { display:flex; gap:10px; align-items:center; }
-    input[type="number"] {
+    input[type="number"], input[type="text"] {
       width: 110px; padding: 8px 10px; border-radius: 10px;
       border:1px solid var(--border); background: var(--input-bg); color:var(--ink);
     }
@@ -372,6 +372,7 @@
         <label class="inline"><input type="checkbox" id="shuffleAnswers" checked /> Amestecă răspunsurile</label>
         <label class="inline"><input type="checkbox" id="shuffleQuestions" checked /> Amestecă întrebările</label>
         <label class="inline">Întrebări: <input type="number" id="numQuestions" min="1" value="20"/></label>
+        <label class="inline">Cod test: <input type="text" id="seedCode" inputmode="text" autocomplete="off" placeholder="ex: RO2025" /></label>
       </div>
       <p>Selecteaza testele din care vrei sa iti fie preluate intrebarile. Poți modifica numărul de întrebări (implicit 20).</p>
       <div class="notice" id="poolNotice" aria-live="polite" style="display:none"></div>
@@ -3523,17 +3524,47 @@
     const $ = sel => document.querySelector(sel);
     const $$ = sel => [...document.querySelectorAll(sel)];
 
-    function shuffle(arr) {
+    function hashSeed(str) {
+      let h1 = 0xdeadbeef ^ str.length;
+      let h2 = 0x41c6ce57 ^ str.length;
+      for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+      }
+      h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+      h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+      return (h2 >>> 0);
+    }
+
+    function mulberry32(seed) {
+      let t = seed >>> 0;
+      return function() {
+        t += 0x6D2B79F5;
+        let r = Math.imul(t ^ (t >>> 15), t | 1);
+        r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function createSeededRandom(seedCode) {
+      const code = typeof seedCode === 'string' ? seedCode.trim() : '';
+      if (!code) return { rng: Math.random, seedValue: null, code: '' };
+      const hash = hashSeed(code);
+      return { rng: mulberry32(hash), seedValue: hash, code };
+    }
+
+    function shuffle(arr, rng = Math.random) {
       const a = arr.slice();
       for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(rng() * (i + 1));
         [a[i], a[j]] = [a[j], a[i]];
       }
       return a;
     }
 
-    function sample(arr, n, doShuffle = true) {
-      const a = doShuffle ? shuffle(arr) : arr.slice();
+    function sample(arr, n, doShuffle = true, rng = Math.random) {
+      const a = doShuffle ? shuffle(arr, rng) : arr.slice();
       return a.slice(0, Math.max(0, Math.min(n, a.length)));
     }
 
@@ -3567,6 +3598,7 @@
       index: 0,
       shuffleAnswers: true,
       shuffleQuestions: true,
+      seedCode: '',
     };
 
     const setListEl = $('#setList');
@@ -3574,7 +3606,12 @@
     const shuffleAnswersEl = $('#shuffleAnswers');
     const shuffleQuestionsEl = $('#shuffleQuestions');
     const numQuestionsEl = $('#numQuestions');
+    const seedCodeEl = $('#seedCode');
     const poolNoticeEl = $('#poolNotice');
+
+    function currentSeedCode() {
+      return (seedCodeEl && typeof seedCodeEl.value === 'string') ? seedCodeEl.value.trim() : '';
+    }
 
     function renderSetList() {
       setListEl.innerHTML = '';
@@ -3631,6 +3668,12 @@
       const value = parseInt(numQuestionsEl.value, 10) || 0;
       trackEvent('questions_requested_change', { value });
     });
+    if (seedCodeEl) {
+      seedCodeEl.addEventListener('change', () => {
+        const code = currentSeedCode();
+        trackEvent('seed_code_change', { seeded: code ? 1 : 0, seed_length: code.length });
+      });
+    }
 
     renderSetList();
 
@@ -3643,32 +3686,46 @@
       return dedupeByQuestion(pool);
     }
 
-    function makeQuiz(nWanted, source = 'start') {
+    function makeQuiz(nWanted, source = 'start', seedCode = '') {
       const pool = buildPool();
       const n = Math.min(nWanted, pool.length);
+      const seedInfo = createSeededRandom(seedCode);
+      const rng = seedInfo.rng;
 
       if (pool.length === 0) {
         showNotice('Nu există întrebări valide în seturile selectate. Verifică datele sau alege alte seturi.', true);
-        trackEvent('quiz_start_failed', { reason: 'empty_pool', requested_questions: nWanted, selected_sets: selectedSets.size });
+        trackEvent('quiz_start_failed', {
+          reason: 'empty_pool',
+          requested_questions: nWanted,
+          selected_sets: selectedSets.size,
+          seeded: seedInfo.code ? 1 : 0,
+          seed_length: seedInfo.code.length,
+        });
         return false;
       }
       if (nWanted > pool.length) {
         showNotice(`Doar ${pool.length} întrebări disponibile în seturile selectate. Testul va folosi ${n}.`, false);
-        trackEvent('quiz_start_adjusted', { requested_questions: nWanted, available_questions: pool.length });
+        trackEvent('quiz_start_adjusted', {
+          requested_questions: nWanted,
+          available_questions: pool.length,
+          seeded: seedInfo.code ? 1 : 0,
+          seed_length: seedInfo.code.length,
+        });
       } else {
         hideNotice();
       }
 
-      const base = quiz.shuffleQuestions ? sample(pool, n, true) : pool.slice(0, n);
+      const base = quiz.shuffleQuestions ? sample(pool, n, true, rng) : pool.slice(0, n);
 
       quiz.questions = base.map(q => {
-        const order = quiz.shuffleAnswers ? shuffle([0,1,2]) : [0,1,2];
+        const order = quiz.shuffleAnswers ? shuffle([0,1,2], rng) : [0,1,2];
         const options = order.map(i => q.options[i]);
         const correctIndex = order.indexOf(q.correct);
         return { id: q.id, text: q.text, options, correctIndex, order };
       });
       quiz.answers = new Array(quiz.questions.length).fill(null);
       quiz.index = 0;
+      quiz.seedCode = seedInfo.code;
       renderQuiz();
       startTimer(3600);
       trackEvent('quiz_start', {
@@ -3677,7 +3734,9 @@
         used_questions: n,
         selected_sets: selectedSets.size,
         shuffle_answers: quiz.shuffleAnswers ? 1 : 0,
-        shuffle_questions: quiz.shuffleQuestions ? 1 : 0
+        shuffle_questions: quiz.shuffleQuestions ? 1 : 0,
+        seeded: seedInfo.code ? 1 : 0,
+        seed_length: seedInfo.code.length,
       });
       return true;
     }
@@ -3840,7 +3899,8 @@
     });
     $('#startBtn').addEventListener('click', () => {
       const wanted = parseInt(numQuestionsEl.value, 10) || 20;
-      makeQuiz(wanted, 'start_button');
+      const seed = currentSeedCode();
+      makeQuiz(wanted, 'start_button', seed);
     });
 
     $('#submitBtn').addEventListener('click', () => {
@@ -3885,7 +3945,8 @@
 
     $('#againBtn').addEventListener('click', () => {
       const wanted = parseInt(numQuestionsEl.value, 10) || 20;
-      makeQuiz(wanted, 'again_button');
+      const seed = currentSeedCode();
+      makeQuiz(wanted, 'again_button', seed);
     });
     $('#reviewBtn').addEventListener('click', () => {
       const block = $('#reviewBlock');
@@ -3953,23 +4014,26 @@
           requested,
           shuffleAnswers: !!quiz.shuffleAnswers,
           shuffleQuestions: !!quiz.shuffleQuestions,
+          seedCode: typeof currentSeedCode === 'function' ? currentSeedCode() : '',
         };
       }
 
-      function buildQuestionSet({ requested, shuffleAnswers, shuffleQuestions }) {
+      function buildQuestionSet({ requested, shuffleAnswers, shuffleQuestions, seedCode }) {
         const pool = buildPool();
+        const seedInfo = createSeededRandom(seedCode);
+        const rng = seedInfo.rng;
         if (!pool || pool.length === 0) {
-          return { questions: [], poolSize: 0 };
+          return { questions: [], poolSize: 0, seedInfo };
         }
         const n = Math.min(requested, pool.length);
-        const base = shuffleQuestions ? sample(pool, n, true) : pool.slice(0, n);
+        const base = shuffleQuestions ? sample(pool, n, true, rng) : pool.slice(0, n);
         const questions = base.map(q => {
-          const order = shuffleAnswers ? shuffle([0,1,2]) : [0,1,2];
+          const order = shuffleAnswers ? shuffle([0,1,2], rng) : [0,1,2];
           const options = order.map(i => q.options[i]);
           const correctIndex = order.indexOf(q.correct);
           return { id: q.id, text: q.text, options, correctIndex };
         });
-        return { questions, poolSize: pool.length };
+        return { questions, poolSize: pool.length, seedInfo };
       }
 
       const INLINE_TEMPLATE = `<!doctype html>
@@ -4065,7 +4129,7 @@
 
       async function generatePdf() {
         const config = selectedQuizConfig();
-        const { questions, poolSize } = buildQuestionSet(config);
+        const { questions, poolSize, seedInfo } = buildQuestionSet(config);
         if (!questions.length) {
           alert('Nu există întrebări valide pentru selecția curentă.');
           return;
@@ -4082,6 +4146,8 @@
           pool: poolSize,
           shuffle_answers: config.shuffleAnswers ? 1 : 0,
           shuffle_questions: config.shuffleQuestions ? 1 : 0,
+          seeded: seedInfo && seedInfo.code ? 1 : 0,
+          seed_length: seedInfo && seedInfo.code ? seedInfo.code.length : 0,
         });
         openPrintableDocument(html);
       }
