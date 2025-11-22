@@ -3610,7 +3610,10 @@
     const poolNoticeEl = $('#poolNotice');
 
     function currentSeedCode() {
-      return (seedCodeEl && typeof seedCodeEl.value === 'string') ? seedCodeEl.value.trim() : '';
+      if (!seedCodeEl || typeof seedCodeEl.value !== 'string') return '';
+      const upper = seedCodeEl.value.toUpperCase();
+      if (seedCodeEl.value !== upper) seedCodeEl.value = upper;
+      return upper.trim();
     }
 
     function renderSetList() {
@@ -3669,6 +3672,9 @@
       trackEvent('questions_requested_change', { value });
     });
     if (seedCodeEl) {
+      seedCodeEl.addEventListener('input', () => {
+        currentSeedCode();
+      });
       seedCodeEl.addEventListener('change', () => {
         const code = currentSeedCode();
         trackEvent('seed_code_change', { seeded: code ? 1 : 0, seed_length: code.length });
