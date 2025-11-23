@@ -2874,10 +2874,10 @@
             "text": "Fapta de a purta fără drept, la adunări publice sau manifestări cultural-sportive arme neletale care nu sunt supuse autorizării, constituie :",
             "options": [
               "Infracțiune pedepsită cu închisoare sau amendă penală",
-              "Contravenție sancționată cu amendă contravențională și anularea dreptului de deținere",
+              "Contravenție sancționată cu amendă contravențională",
               "Contravenție sancționată cu avertisment, anularea dreptului de deținere și confiscarea armelor"
             ],
-            "correct": 0
+            "correct": 1
           },
           {
             "id": "t13_3",
@@ -4068,8 +4068,14 @@
     ol.questions { padding-left: 20px; }
     .questions > li { margin-bottom: 16px; }
     .q-text { font-weight: 700; margin-bottom: 6px; }
-    .opts { margin: 0; padding-left: 20px; }
-    .opts li { margin: 4px 0; }
+    .opts { margin: 0; padding-left: 28px; list-style: none; counter-reset: opt; }
+    .opts li { margin: 4px 0; position: relative; padding-left: 20px; counter-increment: opt; }
+    .opts li::before {
+      content: counter(opt, lower-alpha) ')';
+      position: absolute;
+      left: 0;
+      font-weight: 600;
+    }
     table { border-collapse: collapse; width: 100%; }
     th, td { border:1px solid #ccc; padding: 6px 8px; text-align: left; }
     th { background:#f4f4f9; }
